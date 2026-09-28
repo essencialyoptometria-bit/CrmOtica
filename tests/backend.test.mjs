@@ -1,0 +1,23 @@
+import test from 'node:test';import assert from 'node:assert/strict';import vm from 'node:vm';import {readFileSync} from 'node:fs';import {randomUUID} from 'node:crypto';
+function backend(){
+ const sheets=new Map(),properties=new Map([['API_SECRET','x'.repeat(40)],['LOGIN_PROOF','proof']]),cache=new Map(),sent=[];
+ class Sheet{constructor(){this.cells=[];}getLastRow(){return this.cells.length;}appendRow(r){this.cells.push([...r]);}setFrozenRows(){}getRange(row,col,n=1,m=1){const self=this;return {getValues(){return Array.from({length:n},(_,i)=>Array.from({length:m},(_,j)=>self.cells[row-1+i]?.[col-1+j]??''));},setValues(values){values.forEach((r,i)=>{self.cells[row-1+i]??=[];r.forEach((v,j)=>self.cells[row-1+i][col-1+j]=v);});return this;},setNumberFormat(){return this;},setBackground(){return this;},setFontColor(){return this;},setFontWeight(){return this;}};}}
+ const ss={getId:()=> 'sheet',setSpreadsheetTimeZone(){},getSheetByName:n=>sheets.get(n),insertSheet:n=>{const s=new Sheet();sheets.set(n,s);return s;}};
+ const c=vm.createContext({console,Intl,Date,PropertiesService:{getScriptProperties:()=>({getProperty:k=>properties.get(k),setProperty:(k,v)=>properties.set(k,v)})},SpreadsheetApp:{getActiveSpreadsheet:()=>ss,openById:()=>ss,flush(){}},Utilities:{getUuid:randomUUID,formatDate:(d,t,f)=>f==='H'?'20':'2026-09-28'},ContentService:{MimeType:{JSON:'json'},createTextOutput:s=>({setMimeType(){return s;}})},CacheService:{getScriptCache:()=>({get:k=>cache.get(k),put:(k,v)=>cache.set(k,v),remove:k=>cache.delete(k)})},LockService:{getScriptLock:()=>({tryLock:()=>true,hasLock:()=>true,releaseLock(){}})},MailApp:{sendEmail:m=>sent.push(m)}});
+ vm.runInContext(readFileSync('apps-script/Core.gs','utf8')+'\n'+readFileSync('apps-script/Code.gs','utf8'),c);c.setupSheet();
+ return {c,sent,request:(action,payload={},secret='x'.repeat(40))=>JSON.parse(c.doPost({postData:{contents:JSON.stringify({action,payload,secret})}}))};
+}
+const client=(id='c1',store='Tapira')=>({id,store,name:'Cliente teste',phone:'44999998888',lens:'Visão simples',lastGlasses:'2024-09-01',origin:'Base do caderno',acquired:'2026-09-28',stage:'A contatar'});
+test('setup idempotente; autenticação e limitação de tentativas',()=>{const {c,request}=backend();c.setupSheet();assert.equal(request('bootstrap',{},'wrong').ok,false);assert.equal(request('bootstrap').data.goals.length,2);for(let i=0;i<8;i++)assert.equal(request('login',{key:'a',proof:'wrong'}).ok,false);assert.match(request('login',{key:'a',proof:'proof'}).error,/Muitas/);assert.equal(request('login',{key:'b',proof:'proof'}).ok,true);});
+test('cadastro valida duplicação, datas e edição simultânea',()=>{const {request}=backend();assert.equal(request('saveClient',client()).ok,true);assert.equal(request('saveClient',client('c2')).ok,false);assert.equal(request('saveClient',client('c2','Nova Olímpia')).ok,true);assert.equal(request('saveClient',{...client(),version:99}).ok,false);assert.equal(request('saveClient',{...client('c3'),phone:'44888887777',lastGlasses:'2026-02-31'}).ok,false);});
+test('contato, follow-up, agendamento e venda idempotentes',()=>{
+ const {request}=backend();request('saveClient',client());const contact={id:'contact1',clientId:'c1',date:'2026-09-28',channel:'WhatsApp',source:'Prospecção ativa',result:'Interessado',note:'Conversou',followup:'2026-09-29'};
+ assert.equal(request('addContact',contact).ok,true);let r=request('addContact',contact);assert.equal(r.data.contacts.length,1);assert.equal(r.data.tasks.length,1);
+ r=request('completeTask',{id:'contact1-task',clientId:'c1',version:1});assert.equal(r.data.tasks[0].done,true);
+ assert.equal(request('addAppointment',{id:'ap1',clientId:'c1',date:'2026-09-29',time:'10:30',kind:'Exame'}).data.clients[0].stage,'Agendado');
+ const sale={id:'s1',clientId:'c1',date:'2026-09-28',source:'Anúncio patrocinado',value:999};request('addSale',sale);r=request('addSale',sale);assert.equal(r.data.sales.length,1);assert.equal(r.data.clients[0].stage,'Comprou');assert.equal(r.data.clients.length,1);
+ assert.equal(request('addInvestment',{id:'i1',store:'Tapira',start:'2026-09-29',end:'2026-09-28',campaign:'a',value:100}).ok,false);
+});
+test('configurações gravam histórico e e-mail não duplica no dia',()=>{const {c,request,sent}=backend();let s=request('bootstrap').data.settings;let r=request('saveSettings',{...s,novaDaily:20,email:'teste@example.com'});assert.equal(r.ok,true);assert.equal(r.data.goals[2].effective,'2026-09-29');assert.equal(request('saveSettings',s).ok,false);
+ c.put_('goals',{id:'old1',store:'Tapira',effective:'2026-09-01',daily:10,createdAt:'2026-09-01T00:00:00Z'});c.enviarAlertas();c.enviarAlertas();assert.equal(sent.length,1);assert.match(sent[0].body,/Tapira/);
+});
