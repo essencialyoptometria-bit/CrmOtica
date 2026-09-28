@@ -1,0 +1,9 @@
+.env*
+!.env.example
+node_modules/
+dist/
+.vercel/
+crm-export*.json
+exports/
+.supabase/
+supabase/.temp/

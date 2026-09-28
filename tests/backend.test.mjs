@@ -1,0 +1,7 @@
+import test from 'node:test';import assert from 'node:assert/strict';import vm from 'node:vm';import {readFileSync} from 'node:fs';
+test('alerta consulta Supabase e não repete e-mail no mesmo dia',()=>{
+ const sent=[],props=new Map([['SUPABASE_URL','https://example.supabase.co'],['SUPABASE_SECRET_KEY','sb_secret_test']]);
+ const tables={crm_settings:[{id:'main',email:'teste@example.com',hour:18}],crm_goals:['Tapira','Nova Olímpia'].map(store=>({id:store,store,effective:'2026-09-01',daily:10,createdAt:'2026-09-01T00:00:00Z'})),crm_contacts:[],crm_tasks:[]};
+ const c=vm.createContext({Date,Intl,Utilities:{formatDate:(_d,_tz,f)=>f==='H'?'20':'2026-09-28'},PropertiesService:{getScriptProperties:()=>({getProperty:k=>props.get(k),setProperty:(k,v)=>props.set(k,v)})},LockService:{getScriptLock:()=>({tryLock:()=>true,releaseLock(){}})},UrlFetchApp:{fetch:(url,options)=>{assert.equal(options.headers.apikey,'sb_secret_test');assert.equal(options.headers.Authorization,undefined);return {getResponseCode:()=>200,getContentText:()=>JSON.stringify(tables[url.split('/rest/v1/')[1].split('?')[0]])};}},MailApp:{sendEmail:m=>sent.push(m)}});
+ vm.runInContext(readFileSync('apps-script/Core.gs','utf8')+'\n'+readFileSync('apps-script/Alertas.gs','utf8'),c);c.enviarAlertas();c.enviarAlertas();assert.equal(sent.length,1);assert.match(sent[0].body,/Tapira/);assert.match(sent[0].body,/Nova Olímpia/);
+});

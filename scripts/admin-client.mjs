@@ -1,0 +1,2 @@
+import {createClient} from '@supabase/supabase-js';
+export function admin(){if(!process.env.SUPABASE_URL||!process.env.SUPABASE_SECRET_KEY)throw Error('Defina SUPABASE_URL e SUPABASE_SECRET_KEY no .env.local. Esta chave é administrativa e não deve ser compartilhada.');return createClient(process.env.SUPABASE_URL,process.env.SUPABASE_SECRET_KEY,{auth:{persistSession:false,autoRefreshToken:false}});}

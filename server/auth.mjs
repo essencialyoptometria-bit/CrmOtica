@@ -1,0 +1,4 @@
+import {createCipheriv,createDecipheriv,createHash,randomBytes} from 'node:crypto';
+const key=secret=>createHash('sha256').update(secret).digest();
+export function seal(session,secret,deadline=Date.now()+12*3600000){const iv=randomBytes(12);const cipher=createCipheriv('aes-256-gcm',key(secret),iv);const bytes=Buffer.concat([cipher.update(JSON.stringify({access_token:session.access_token,refresh_token:session.refresh_token,expires_at:session.expires_at,deadline})),cipher.final()]);return Buffer.concat([iv,cipher.getAuthTag(),bytes]).toString('base64url');}
+export function unseal(token,secret,now=Date.now()){try{const b=Buffer.from(token||'','base64url');const d=createDecipheriv('aes-256-gcm',key(secret),b.subarray(0,12));d.setAuthTag(b.subarray(12,28));const obj=JSON.parse(Buffer.concat([d.update(b.subarray(28)),d.final()]).toString());return obj.deadline>now&&obj.access_token&&obj.refresh_token?obj:null;}catch{return null;}}
